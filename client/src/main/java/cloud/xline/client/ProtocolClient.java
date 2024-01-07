@@ -1,90 +1,27 @@
 package cloud.xline.client;
 
-import java.util.*;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.logging.Logger;
-
 import cloud.xline.client.exceptions.CommandExecutionException;
 import com.curp.protobuf.*;
-import com.google.protobuf.InvalidProtocolBufferException;
-import io.grpc.*;
-import org.apache.commons.math3.util.Pair;
 import com.curp.protobuf.ProtocolGrpc.ProtocolBlockingStub;
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.xline.protobuf.Command;
 import com.xline.protobuf.CommandResponse;
 import com.xline.protobuf.ExecuteError;
 import com.xline.protobuf.SyncResponse;
+import io.grpc.*;
+import org.apache.commons.math3.util.Pair;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.UUID;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.logging.Logger;
 
 public class ProtocolClient {
 
     private static final Logger logger = Logger.getLogger(ProtocolClient.class.getName());
-
-    private class State {
-        private final ReadWriteLock lock;
-        private long leaderId;
-        private long term;
-        private long clusterVersion;
-        private HashMap<Long, ProtocolBlockingStub> stubs;
-
-        State(long leaderId, long term, long clusterVersion, HashMap<Long, ProtocolBlockingStub> stubs) {
-            this.lock = new ReentrantReadWriteLock();
-            this.leaderId = leaderId;
-            this.term = term;
-            this.clusterVersion = clusterVersion;
-            this.stubs = stubs;
-        }
-
-        long getClusterVersion() {
-            this.lock.readLock().lock();
-            long version = this.clusterVersion;
-            this.lock.readLock().unlock();
-            return version;
-        }
-
-        HashMap<Long, ProtocolBlockingStub> getStubs() {
-            this.lock.readLock().lock();
-            HashMap<Long, ProtocolBlockingStub> stubs = this.stubs;
-            this.lock.readLock().unlock();
-            return stubs;
-        }
-
-        long getLeader() {
-            this.lock.readLock().lock();
-            long res = this.leaderId;
-            this.lock.readLock().unlock();
-            return res;
-        }
-
-        void checkUpdate(FetchClusterResponse res) {
-            this.lock.writeLock().lock();
-            if (res.getTerm() < this.term) {
-                this.lock.writeLock().unlock();
-                return;
-            }
-            if (res.hasLeaderId() && this.term < res.getTerm()) {
-                this.term = res.getTerm();
-                this.leaderId = res.getLeaderId();
-                logger.config("client term updates to " + this.term);
-                logger.config("client leader id updates to " + this.leaderId);
-            }
-            if (res.getClusterVersion() <= this.clusterVersion) {
-                this.lock.writeLock().unlock();
-                return;
-            }
-            this.clusterVersion = res.getClusterVersion();
-            HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
-            for (Member member : res.getMembersList()) {
-                ManagedChannel channel = Grpc.newChannelBuilder(member.getName(), InsecureChannelCredentials.create()).build();
-                ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
-                stubs.put(member.getId(), stub);
-            }
-            // TODO: do NOT drop the old stubs, instead modify the stubs (use ConcurrentHashMap)
-            this.stubs = stubs;
-            this.lock.writeLock().unlock();
-        }
-    }
-
     private final State state;
 
     public ProtocolClient(ArrayList<ManagedChannel> channels) {
@@ -252,5 +189,71 @@ public class ProtocolClient {
         int faultTolerance = nodes / 2;
         int quorum = faultTolerance + 1;
         return faultTolerance + (quorum / 2) + 1;
+    }
+
+    private class State {
+        private final ReadWriteLock lock;
+        private long leaderId;
+        private long term;
+        private long clusterVersion;
+        private HashMap<Long, ProtocolBlockingStub> stubs;
+
+        State(long leaderId, long term, long clusterVersion, HashMap<Long, ProtocolBlockingStub> stubs) {
+            this.lock = new ReentrantReadWriteLock();
+            this.leaderId = leaderId;
+            this.term = term;
+            this.clusterVersion = clusterVersion;
+            this.stubs = stubs;
+        }
+
+        long getClusterVersion() {
+            this.lock.readLock().lock();
+            long version = this.clusterVersion;
+            this.lock.readLock().unlock();
+            return version;
+        }
+
+        HashMap<Long, ProtocolBlockingStub> getStubs() {
+            this.lock.readLock().lock();
+            HashMap<Long, ProtocolBlockingStub> stubs = this.stubs;
+            this.lock.readLock().unlock();
+            return stubs;
+        }
+
+        long getLeader() {
+            this.lock.readLock().lock();
+            long res = this.leaderId;
+            this.lock.readLock().unlock();
+            return res;
+        }
+
+        void checkUpdate(FetchClusterResponse res) {
+            this.lock.writeLock().lock();
+            if (res.getTerm() < this.term) {
+                this.lock.writeLock().unlock();
+                return;
+            }
+            if (res.hasLeaderId() && this.term < res.getTerm()) {
+                this.term = res.getTerm();
+                this.leaderId = res.getLeaderId();
+                logger.config("client term updates to " + this.term);
+                logger.config("client leader id updates to " + this.leaderId);
+            }
+            if (res.getClusterVersion() == this.clusterVersion) {
+                this.lock.writeLock().unlock();
+                return;
+            }
+            this.clusterVersion = res.getClusterVersion();
+            HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
+            for (Member member : res.getMembersList()) {
+                // TODO: endpoint load balance?
+                ManagedChannel channel = Grpc.newChannelBuilder(member.getAddrs(0), InsecureChannelCredentials.create()).build();
+                ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
+                stubs.put(member.getId(), stub);
+            }
+            // TODO: do NOT drop the old stubs, instead modify the stubs (use ConcurrentHashMap)
+            this.stubs = stubs;
+            this.lock.writeLock().unlock();
+        }
     }
 }
