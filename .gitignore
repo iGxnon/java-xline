@@ -36,3 +36,5 @@ build
 playground
 
 .idea
+
+!gradle/wrapper/gradle-wrapper.jar

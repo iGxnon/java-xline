@@ -34,7 +34,8 @@ public class ProtocolClient {
         HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
         long clusterVersion = 0;
         for (Member member : res.getMembersList()) {
-            ManagedChannel channel = Grpc.newChannelBuilder(member.getName(), InsecureChannelCredentials.create()).build();
+            // TODO: endpoint load balance
+            ManagedChannel channel = Grpc.newChannelBuilder(member.getAddrs(0), InsecureChannelCredentials.create()).build();
             ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
             stubs.put(member.getId(), stub);
             clusterVersion = res.getClusterVersion();
@@ -246,7 +247,7 @@ public class ProtocolClient {
             this.clusterVersion = res.getClusterVersion();
             HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
             for (Member member : res.getMembersList()) {
-                // TODO: endpoint load balance?
+                // TODO: endpoint load balance
                 ManagedChannel channel = Grpc.newChannelBuilder(member.getAddrs(0), InsecureChannelCredentials.create()).build();
                 ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
                 stubs.put(member.getId(), stub);
