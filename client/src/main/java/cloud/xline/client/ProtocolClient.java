@@ -151,21 +151,7 @@ public class ProtocolClient {
     private Pair<CommandResponse, SyncResponse> slowRound(ProposeId id)
             throws InvalidProtocolBufferException, CommandExecutionException {
         logger.info(String.format("Slow round start. Propose ID %s.", id));
-        long leaderId = this.state.getLeader();
-        ProtocolBlockingStub leader = this.state.getStubs().get(leaderId);
-        if (leader == null) {
-            FetchClusterResponse res;
-            do {
-                res = this.fetchCluster(this.state.getStubs().values());
-                this.state.checkUpdate(res);
-            } while (res.hasLeaderId());
-            leader = this.state.getStubs().get(res.getLeaderId());
-            if (leader == null) {
-                // mock a status error to outside if leader is still null
-                throw new StatusRuntimeException(Status.DATA_LOSS);
-            }
-        }
-
+        ProtocolBlockingStub leader = this.mustGetLeaderStub();
         WaitSyncedRequest waitSyncReq =
                 WaitSyncedRequest.newBuilder()
                         .setProposeId(id)
@@ -186,7 +172,7 @@ public class ProtocolClient {
     }
 
     /**
-     * Fetch cluster from servers
+     * Fetch cluster from servers TODO: Needs to be refactored when cluster server refactored
      *
      * @throws StatusRuntimeException on server error (servers all failed)
      */
@@ -211,7 +197,34 @@ public class ProtocolClient {
         return faultTolerance + (quorum / 2) + 1;
     }
 
-    private class State {
+    /**
+     * Must get the leader stub
+     *
+     * @return leader stub
+     */
+    ProtocolBlockingStub mustGetLeaderStub() {
+        try {
+            this.state.lock.readLock().lock();
+            ProtocolBlockingStub leader = this.state.stubs.get(this.state.leaderId);
+            if (leader == null) {
+                FetchClusterResponse res;
+                do {
+                    res = this.fetchCluster(this.state.stubs.values());
+                    this.state.checkUpdate(res);
+                } while (res.hasLeaderId());
+                leader = this.state.stubs.get(res.getLeaderId());
+                if (leader == null) {
+                    // mock a status error to outside if leader is still null
+                    throw new StatusRuntimeException(Status.DATA_LOSS);
+                }
+            }
+            return leader;
+        } finally {
+            this.state.lock.readLock().unlock();
+        }
+    }
+
+    private static class State {
         private final ReadWriteLock lock;
         private long leaderId;
         private long term;
@@ -252,35 +265,36 @@ public class ProtocolClient {
         }
 
         void checkUpdate(FetchClusterResponse res) {
-            this.lock.writeLock().lock();
-            if (res.getTerm() < this.term) {
+            try {
+                this.lock.writeLock().lock();
+                if (res.getTerm() < this.term) {
+                    return;
+                }
+                if (res.hasLeaderId() && this.term < res.getTerm()) {
+                    this.term = res.getTerm();
+                    this.leaderId = res.getLeaderId();
+                    logger.config("client term updates to " + this.term);
+                    logger.config("client leader id updates to " + this.leaderId);
+                }
+                if (res.getClusterVersion() == this.clusterVersion) {
+                    return;
+                }
+                this.clusterVersion = res.getClusterVersion();
+                HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
+                for (Member member : res.getMembersList()) {
+                    // TODO: endpoint load balance
+                    ManagedChannel channel =
+                            Grpc.newChannelBuilder(
+                                            member.getAddrs(0), InsecureChannelCredentials.create())
+                                    .build();
+                    ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
+                    stubs.put(member.getId(), stub);
+                }
+                // TODO: do NOT drop the old stubs, instead modify the stubs (use ConcurrentHashMap)
+                this.stubs = stubs;
+            } finally {
                 this.lock.writeLock().unlock();
-                return;
             }
-            if (res.hasLeaderId() && this.term < res.getTerm()) {
-                this.term = res.getTerm();
-                this.leaderId = res.getLeaderId();
-                logger.config("client term updates to " + this.term);
-                logger.config("client leader id updates to " + this.leaderId);
-            }
-            if (res.getClusterVersion() == this.clusterVersion) {
-                this.lock.writeLock().unlock();
-                return;
-            }
-            this.clusterVersion = res.getClusterVersion();
-            HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
-            for (Member member : res.getMembersList()) {
-                // TODO: endpoint load balance
-                ManagedChannel channel =
-                        Grpc.newChannelBuilder(
-                                        member.getAddrs(0), InsecureChannelCredentials.create())
-                                .build();
-                ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
-                stubs.put(member.getId(), stub);
-            }
-            // TODO: do NOT drop the old stubs, instead modify the stubs (use ConcurrentHashMap)
-            this.stubs = stubs;
-            this.lock.writeLock().unlock();
         }
     }
 }
