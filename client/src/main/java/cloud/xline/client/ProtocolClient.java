@@ -1,6 +1,7 @@
 package cloud.xline.client;
 
 import cloud.xline.client.exceptions.CommandExecutionException;
+
 import com.curp.protobuf.*;
 import com.curp.protobuf.ProtocolGrpc.ProtocolBlockingStub;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -8,7 +9,9 @@ import com.xline.protobuf.Command;
 import com.xline.protobuf.CommandResponse;
 import com.xline.protobuf.ExecuteError;
 import com.xline.protobuf.SyncResponse;
+
 import io.grpc.*;
+
 import org.apache.commons.math3.util.Pair;
 
 import java.util.ArrayList;
@@ -35,7 +38,9 @@ public class ProtocolClient {
         long clusterVersion = 0;
         for (Member member : res.getMembersList()) {
             // TODO: endpoint load balance
-            ManagedChannel channel = Grpc.newChannelBuilder(member.getAddrs(0), InsecureChannelCredentials.create()).build();
+            ManagedChannel channel =
+                    Grpc.newChannelBuilder(member.getAddrs(0), InsecureChannelCredentials.create())
+                            .build();
             ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
             stubs.put(member.getId(), stub);
             clusterVersion = res.getClusterVersion();
@@ -48,10 +53,11 @@ public class ProtocolClient {
      *
      * @return CommandResponse if success
      * @throws InvalidProtocolBufferException on deserialize error
-     * @throws CommandExecutionException      on command execution error
-     * @throws StatusRuntimeException         on server error
+     * @throws CommandExecutionException on command execution error
+     * @throws StatusRuntimeException on server error
      */
-    public CommandResponse propose(Command cmd, Boolean useFastPath) throws InvalidProtocolBufferException, CommandExecutionException {
+    public CommandResponse propose(Command cmd, Boolean useFastPath)
+            throws InvalidProtocolBufferException, CommandExecutionException {
         ProposeId id = this.getProposeId();
         // TODO
         //   Use non-blocking ProtocolClient(ProtocolFutureStub)
@@ -78,11 +84,12 @@ public class ProtocolClient {
      * Run fast round
      *
      * @return return the CommandResponse
-     * @throws StatusRuntimeException         on server error
-     * @throws CommandExecutionException      on command execution error
+     * @throws StatusRuntimeException on server error
+     * @throws CommandExecutionException on command execution error
      * @throws InvalidProtocolBufferException on deserialize error
      */
-    public CommandResponse fastRound(ProposeId id, Command cmd) throws CommandExecutionException, InvalidProtocolBufferException {
+    public CommandResponse fastRound(ProposeId id, Command cmd)
+            throws CommandExecutionException, InvalidProtocolBufferException {
         logger.info(String.format("Fast round start. Propose ID %s.", id));
 
         int okCnt = 0;
@@ -93,7 +100,12 @@ public class ProtocolClient {
         int superQuorum = this.superQuorum(stubs.size());
 
         for (ProtocolBlockingStub stub : stubs) {
-            ProposeRequest propReq = ProposeRequest.newBuilder().setCommand(cmd.toByteString()).setProposeId(id).setClusterVersion(this.state.getClusterVersion()).build();
+            ProposeRequest propReq =
+                    ProposeRequest.newBuilder()
+                            .setCommand(cmd.toByteString())
+                            .setProposeId(id)
+                            .setClusterVersion(this.state.getClusterVersion())
+                            .build();
             try {
                 ProposeResponse res = stub.propose(propReq);
                 okCnt++;
@@ -132,11 +144,12 @@ public class ProtocolClient {
      * Run slow round
      *
      * @return return the Pair<CommandResponse, SyncResponse>
-     * @throws StatusRuntimeException         on server error
+     * @throws StatusRuntimeException on server error
      * @throws InvalidProtocolBufferException on deserialize error
-     * @throws CommandExecutionException      on command execution error
+     * @throws CommandExecutionException on command execution error
      */
-    private Pair<CommandResponse, SyncResponse> slowRound(ProposeId id) throws InvalidProtocolBufferException, CommandExecutionException {
+    private Pair<CommandResponse, SyncResponse> slowRound(ProposeId id)
+            throws InvalidProtocolBufferException, CommandExecutionException {
         logger.info(String.format("Slow round start. Propose ID %s.", id));
         long leaderId = this.state.getLeader();
         ProtocolBlockingStub leader = this.state.getStubs().get(leaderId);
@@ -153,13 +166,19 @@ public class ProtocolClient {
             }
         }
 
-        WaitSyncedRequest waitSyncReq = WaitSyncedRequest.newBuilder().setProposeId(id).setClusterVersion(this.state.getClusterVersion()).build();
+        WaitSyncedRequest waitSyncReq =
+                WaitSyncedRequest.newBuilder()
+                        .setProposeId(id)
+                        .setClusterVersion(this.state.getClusterVersion())
+                        .build();
         WaitSyncedResponse res = leader.waitSynced(waitSyncReq);
         if (res.getExeResult().hasError()) {
-            throw new CommandExecutionException(ExecuteError.parseFrom(res.getExeResult().getError()));
+            throw new CommandExecutionException(
+                    ExecuteError.parseFrom(res.getExeResult().getError()));
         }
         if (res.getAfterSyncResult().hasError()) {
-            throw new CommandExecutionException(ExecuteError.parseFrom(res.getAfterSyncResult().getError()));
+            throw new CommandExecutionException(
+                    ExecuteError.parseFrom(res.getAfterSyncResult().getError()));
         }
         CommandResponse er = CommandResponse.parseFrom(res.getExeResult().getOk());
         SyncResponse asr = SyncResponse.parseFrom(res.getAfterSyncResult().getOk());
@@ -199,7 +218,11 @@ public class ProtocolClient {
         private long clusterVersion;
         private HashMap<Long, ProtocolBlockingStub> stubs;
 
-        State(long leaderId, long term, long clusterVersion, HashMap<Long, ProtocolBlockingStub> stubs) {
+        State(
+                long leaderId,
+                long term,
+                long clusterVersion,
+                HashMap<Long, ProtocolBlockingStub> stubs) {
             this.lock = new ReentrantReadWriteLock();
             this.leaderId = leaderId;
             this.term = term;
@@ -248,7 +271,10 @@ public class ProtocolClient {
             HashMap<Long, ProtocolBlockingStub> stubs = new HashMap<>();
             for (Member member : res.getMembersList()) {
                 // TODO: endpoint load balance
-                ManagedChannel channel = Grpc.newChannelBuilder(member.getAddrs(0), InsecureChannelCredentials.create()).build();
+                ManagedChannel channel =
+                        Grpc.newChannelBuilder(
+                                        member.getAddrs(0), InsecureChannelCredentials.create())
+                                .build();
                 ProtocolBlockingStub stub = ProtocolGrpc.newBlockingStub(channel);
                 stubs.put(member.getId(), stub);
             }

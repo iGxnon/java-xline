@@ -3,11 +3,9 @@
  */
 package client;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import cloud.xline.client.ProtocolClient;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 
 import com.google.protobuf.ByteString;
 import com.xline.protobuf.Command;
@@ -19,7 +17,10 @@ import io.grpc.Grpc;
 import io.grpc.InsecureChannelCredentials;
 import io.grpc.ManagedChannel;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 
@@ -34,7 +35,8 @@ class ProtocolTest {
 
         ArrayList<ManagedChannel> channels = new ArrayList<>();
         for (String curpMember : curpMembers) {
-            ManagedChannel channel = Grpc.newChannelBuilder(curpMember, InsecureChannelCredentials.create()).build();
+            ManagedChannel channel =
+                    Grpc.newChannelBuilder(curpMember, InsecureChannelCredentials.create()).build();
             channels.add(channel);
         }
 
@@ -43,20 +45,28 @@ class ProtocolTest {
 
     @BeforeEach
     void toCmd() {
-        this.cmd = Command.newBuilder().setRequest(RequestWithToken.newBuilder().setPutRequest(PutRequest.newBuilder().setKey(ByteString.copyFromUtf8("Hello")).setValue(ByteString.copyFromUtf8("Xline")).build()).build()).build();
+        this.cmd =
+                Command.newBuilder()
+                        .setRequest(
+                                RequestWithToken.newBuilder()
+                                        .setPutRequest(
+                                                PutRequest.newBuilder()
+                                                        .setKey(ByteString.copyFromUtf8("Hello"))
+                                                        .setValue(ByteString.copyFromUtf8("Xline"))
+                                                        .build())
+                                        .build())
+                        .build();
     }
 
     @Test
     void testProposeInFastPath() throws Exception {
         CommandResponse res = client.propose(cmd, true);
         assertNotNull(res);
-        System.out.println(res);
     }
 
     @Test
     void testProposeInSlowPath() throws Exception {
         CommandResponse res = client.propose(this.cmd, false);
         assertNotNull(res);
-        System.out.println(res);
     }
 }
